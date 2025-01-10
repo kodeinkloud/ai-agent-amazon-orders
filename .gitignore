@@ -30,3 +30,7 @@
 *.exe
 *.out
 *.app
+
+myenv/
+myenvnsource/
+.DS_Store
