@@ -239,3 +239,37 @@ COMMENT ON TABLE returns IS 'Stores return information for retail orders';
 COMMENT ON TABLE refunds IS 'Stores refund information for returns';
 COMMENT ON TABLE digital_borrows IS 'Stores digital content borrowing information';
 COMMENT ON TABLE cart_items IS 'Stores shopping cart items';
+
+
+
+-- First, disable foreign key checks to avoid dependency issues
+SET session_replication_role = 'replica';
+
+-- Drop all tables with CASCADE to handle dependencies
+DROP TABLE IF EXISTS 
+    cart_items,
+    digital_borrows,
+    digital_order_payments,
+    digital_order_items,
+    digital_orders,
+    refunds,
+    returns,
+    order_items,
+    orders,
+    payment_methods,
+    addresses,
+    products
+CASCADE;
+
+-- Drop all custom types
+DROP TYPE IF EXISTS 
+    order_status_enum,
+    shipment_status_enum,
+    return_status_enum
+CASCADE;
+
+-- Drop all functions and triggers
+DROP FUNCTION IF EXISTS update_updated_at_column() CASCADE;
+
+-- Reset foreign key checks
+SET session_replication_role = 'origin';
