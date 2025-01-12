@@ -26,9 +26,9 @@ class DatabaseConnection:
 
 # Default database configuration
 db_config = {
-    "dbname": "amazon-orders",
-    "user": "pgangasani",
-    "password": "",
+    "dbname": "database-name",
+    "user": "username",
+    "password": "password",
     "host": "localhost",
     "port": "5432"
 }
