@@ -36,8 +36,8 @@ myenvnsource/
 .DS_Store
 
 # Database configuration
-# data-processor/database_connection.py
-# data-processor/config.py
+data-processor/database_connection.py
+data-processor/config.py
 # Python cache files
 __pycache__/
 *.py[cod]
