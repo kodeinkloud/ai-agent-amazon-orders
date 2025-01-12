@@ -2,6 +2,7 @@ import pandas as pd
 import os
 from datetime import datetime
 from database_connection import db
+from config import ORDERS_CSV_FILE_PATH
 
 def read_orders_csv(file_path):
     """
@@ -159,10 +160,9 @@ def store_orders(df):
         raise e from None
 
 if __name__ == "__main__":
-    csv_file = "/Users/pgangasani/Documents/development/ai-agents/ai-agent-amazon-orders/data/orders.csv"
-    
     # Read orders data
-    orders_df = read_orders_csv(csv_file)
+    print(f"Reading orders data from {ORDERS_CSV_FILE_PATH}")
+    orders_df = read_orders_csv(ORDERS_CSV_FILE_PATH)
     
     # Store orders in database
     processed, failed = store_orders(orders_df)

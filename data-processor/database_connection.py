@@ -1,5 +1,6 @@
 import psycopg2
 from contextlib import contextmanager
+from config import DB_CONFIG
 
 class DatabaseConnection:
     def __init__(self, db_params):
@@ -24,14 +25,5 @@ class DatabaseConnection:
             if conn:
                 conn.close()
 
-# Default database configuration
-db_config = {
-    "dbname": "database-name",
-    "user": "username",
-    "password": "password",
-    "host": "localhost",
-    "port": "5432"
-}
-
 # Create a default database connection instance
-db = DatabaseConnection(db_config)
+db = DatabaseConnection(DB_CONFIG)
