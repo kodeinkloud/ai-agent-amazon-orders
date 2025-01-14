@@ -1,29 +1,27 @@
 import psycopg2
-from contextlib import contextmanager
 from config import DB_CONFIG
 
 class DatabaseConnection:
-    def __init__(self, db_params):
-        self.db_params = db_params
+    def __init__(self):
+        self.conn = None
+        self.cursor = None
 
-    @contextmanager
-    def get_cursor(self):
-        conn = None
+    def connect_to_db(self):
+        """Establish database connection"""
         try:
-            # Connect to database
-            conn = psycopg2.connect(**self.db_params)
-            cursor = conn.cursor()
-            yield cursor
-            conn.commit()
+            self.conn = psycopg2.connect(**DB_CONFIG)
+            self.cursor = self.conn.cursor()
+            # logging.info("Successfully connected to database")
         except Exception as e:
-            if conn:
-                conn.rollback()
-            raise e
-        finally:
-            if cursor:
-                cursor.close()
-            if conn:
-                conn.close()
-
-# Create a default database connection instance
-db = DatabaseConnection(DB_CONFIG)
+            # logging.error(f"Error connecting to database: {e}")
+            raise
+    def close_connection(self):
+        """Close database connection"""
+        if self.cursor:
+            self.cursor.close()
+        if self.conn:
+            self.conn.close()
+            # logging.info("Database connection closed")
+            
+# Create a single instance to be used throughout the application
+db = DatabaseConnection()

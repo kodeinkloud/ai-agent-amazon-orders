@@ -1,168 +1,224 @@
+import logging
+
 import pandas as pd
-import os
-from datetime import datetime
-from database_connection import db
 from config import ORDERS_CSV_FILE_PATH
+from database_connection import db
+from psycopg2.extras import execute_values
 
-def read_orders_csv(file_path):
-    """
-    Read and validate the orders CSV file
-    
-    Args:
-        file_path (str): Path to the CSV file
-        
-    Returns:
-        pd.DataFrame: DataFrame containing the orders data
-    
-    Raises:
-        FileNotFoundError: If the CSV file doesn't exist
-        ValueError: If required columns are missing
-    """
-    try:
-        # Check if file exists
-        if not os.path.exists(file_path):
-            raise FileNotFoundError(f"CSV file not found at: {file_path}")
-            
-        # Read the CSV file
-        df = pd.read_csv(file_path)
-        
-        # Required columns in the CSV
-        required_columns = [
-            'Order ID', 'Website', 'Order Date', 'Currency',
-            'Order Status', 'Shipping Address', 'Billing Address',
-            'Total Owed', 'Shipping Charge', 'Total Discounts',
-            'ASIN', 'Quantity', 'Unit Price', 'Unit Price Tax',
-            'Shipment Status', 'Ship Date', 'Shipping Option',
-            'Carrier Name & Tracking Number'
-        ]
-        
-        # Validate required columns
-        missing_columns = [col for col in required_columns if col not in df.columns]
-        if missing_columns:
-            raise ValueError(f"Missing required columns: {', '.join(missing_columns)}")
-            
-        # Print basic information about the data
-        print("\nOrders CSV Summary:")
-        print(f"- Total rows: {len(df)}")
-        print(f"- Unique orders: {df['Order ID'].nunique()}")
-        print(f"- Date range: {df['Order Date'].min()} to {df['Order Date'].max()}")
-        print(f"- Unique products: {df['ASIN'].nunique()}")
-        
-        return df
-        
-    except pd.errors.EmptyDataError:
-        print("Error: The CSV file is empty")
-        raise
-    except pd.errors.ParserError:
-        print("Error: Unable to parse the CSV file. Please check the file format")
-        raise
-    except Exception as e:
-        print(f"Error reading CSV file: {str(e)}")
-        raise
 
-def store_orders(df):
-    """
-    Store orders data into the database
-    
-    Args:
-        df (pd.DataFrame): DataFrame containing the orders data
-        
-    Returns:
-        tuple: (orders_processed, orders_failed)
-    """
-    orders_processed = 0
-    orders_failed = 0
-    
-    try:
-        with db.get_cursor() as cur:
-            # Process each unique order
-            for order_id in df['Order ID'].unique():
+class OrdersImporter:
+    def __init__(self, db_connection):
+        self.db = db_connection
+        self.db.connect_to_db()
+
+    def import_orders_from_csv(self):
+        logging.info(ORDERS_CSV_FILE_PATH)
+        df = pd.read_csv(ORDERS_CSV_FILE_PATH)
+        self.process_products(df)
+        self.process_orders(df)
+        self.process_order_items(df)
+
+    def process_products(self, df):
+        """Process and insert products data"""
+        try:
+            # Check if we're processing digital items or regular orders
+            if "ProductName" in df.columns:
+                product_name_col = "ProductName"
+            elif "Product Name" in df.columns:
+                product_name_col = "Product Name"
+            else:
+                raise ValueError("No product name column found in DataFrame")
+
+            # Prepare products data
+            products_data = df[["ASIN", product_name_col]].drop_duplicates(
+                subset=["ASIN"], keep="last"
+            )
+
+            logging.info(f"Processing {len(products_data)} unique products")
+
+            # Insert products
+            insert_query = """
+                INSERT INTO products (asin, product_name)
+                VALUES %s
+                ON CONFLICT (asin) DO UPDATE 
+                SET product_name = EXCLUDED.product_name,
+                    updated_at = CURRENT_TIMESTAMP
+                RETURNING id, asin
+            """
+
+            products_tuples = [
+                (
+                    row["ASIN"],
+                    row[product_name_col] if pd.notna(row[product_name_col]) else None,
+                )
+                for _, row in products_data.iterrows()
+            ]
+
+            execute_values(self.db.cursor, insert_query, products_tuples)
+            self.db.conn.commit()
+            logging.info(f"Inserted/updated {len(products_data)} products")
+
+        except Exception as e:
+            logging.error(f"Error processing products: {e}")
+            self.db.conn.rollback()
+            raise
+
+    def process_orders(self, df):
+        """Process and insert orders data"""
+        try:
+            # Process orders
+            orders_data = df[
+                [
+                    "Order ID",
+                    "Website",
+                    "Order Date",
+                    "Currency",
+                    "Total Owed",
+                    "Shipping Charge",
+                    "Total Discounts",
+                ]
+            ].drop_duplicates()
+
+            # Insert orders
+            insert_query = """
+                INSERT INTO orders (
+                    order_id, website, order_date, currency,
+                    total_owed, shipping_charge, total_discounts
+                )
+                VALUES %s
+                ON CONFLICT (order_id) DO NOTHING
+                RETURNING id
+            """
+
+            def clean_monetary_value(value):
+                """Clean monetary values by removing currency symbols and handling negative values"""
                 try:
-                    order_data = df[df['Order ID'] == order_id].iloc[0]
-                    
-                    # Debug logging for numeric fields
-                    print(f"\nProcessing order {order_id}:")
-                    print(f"- Total Owed: {order_data['Total Owed']} (type: {type(order_data['Total Owed'])})")
-                    print(f"- Shipping Charge: {order_data['Shipping Charge']} (type: {type(order_data['Shipping Charge'])})")
-                    print(f"- Total Discounts: {order_data['Total Discounts']} (type: {type(order_data['Total Discounts'])})")
-                    
-                    # Convert order date to timestamp
-                    order_date = datetime.strptime(
-                        order_data['Order Date'], 
-                        '%Y-%m-%dT%H:%M:%SZ'
+                    # Convert to string and remove currency symbols and commas
+                    cleaned = str(value).replace("$", "").replace(",", "")
+                    # Remove quotes if present
+                    cleaned = cleaned.replace('"', "").replace("'", "")
+                    return float(cleaned)
+                except (ValueError, AttributeError):
+                    logging.warning(
+                        f"Could not convert value: {value}, defaulting to 0.0"
                     )
-                    
-                    # Safely convert numeric values
-                    try:
-                        total_owed = float(str(order_data['Total Owed']).replace('"', '').replace("'", ""))
-                        shipping_charge = float(str(order_data['Shipping Charge']).replace('"', '').replace("'", ""))
-                        total_discounts = (
-                            float(str(order_data['Total Discounts']).replace('"', '').replace("'", ""))
-                            if order_data['Total Discounts'] != 'Not Available' 
-                            else 0
-                        )
-                    except ValueError as ve:
-                        print(f"Error converting numeric values for order {order_id}:")
-                        print(f"- Total Owed value: '{order_data['Total Owed']}'")
-                        print(f"- Shipping Charge value: '{order_data['Shipping Charge']}'")
-                        print(f"- Total Discounts value: '{order_data['Total Discounts']}'")
-                        raise ValueError(f"Failed to convert numeric values: {str(ve)}") from ve
-                    
-                    # Insert order
-                    cur.execute("""
-                        INSERT INTO orders (
-                            order_id, website, order_date, currency,
-                            order_status, total_owed, shipping_charge,
-                            total_discounts, created_at, updated_at
-                        )
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                        ON CONFLICT (order_id) 
-                        DO UPDATE SET
-                            order_status = EXCLUDED.order_status,
-                            total_owed = EXCLUDED.total_owed,
-                            shipping_charge = EXCLUDED.shipping_charge,
-                            total_discounts = EXCLUDED.total_discounts,
-                            updated_at = CURRENT_TIMESTAMP
-                        RETURNING id
-                    """, (
-                        order_id,
-                        order_data['Website'],
-                        order_date,
-                        order_data['Currency'],
-                        order_data['Order Status'],
-                        total_owed,
-                        shipping_charge,
-                        total_discounts,
-                        datetime.now(),
-                        datetime.now()
-                    ))
-                    
-                    orders_processed += 1
-                    
+                    return 0.0
+
+            orders_tuples = [
+                (
+                    row["Order ID"],
+                    row["Website"],
+                    pd.to_datetime(row["Order Date"]),
+                    row["Currency"],
+                    clean_monetary_value(row["Total Owed"]),
+                    clean_monetary_value(row["Shipping Charge"]),
+                    clean_monetary_value(row["Total Discounts"]),
+                )
+                for _, row in orders_data.iterrows()
+            ]
+
+            execute_values(self.db.cursor, insert_query, orders_tuples)
+            self.db.conn.commit()
+            logging.info(f"Inserted {len(orders_data)} orders")
+
+        except Exception as e:
+            logging.error(f"Error processing orders: {e}")
+            self.db.conn.rollback()
+            raise
+
+    def process_order_items(self, df):
+        """Process and insert order items"""
+        try:
+            # Process order items
+            items_data = df[
+                [
+                    "Order ID",
+                    "ASIN",
+                    "Quantity",
+                    "Unit Price",
+                    "Unit Price Tax",
+                    "Shipment Status",
+                    "Ship Date",
+                ]
+            ].drop_duplicates()
+
+            # Insert order items
+            insert_query = """
+                INSERT INTO order_items (
+                    order_id, product_id, quantity, unit_price,
+                    unit_price_tax, shipment_status, ship_date
+                )
+                SELECT 
+                    %s, p.id, %s, %s, %s, %s::shipment_status_enum, %s
+                FROM products p
+                WHERE p.asin = %s
+                ON CONFLICT DO NOTHING
+            """
+
+            def parse_date(date_str):
+                """Parse date string and handle 'Not Available' and ISO format"""
+                try:
+                    if pd.isna(date_str) or date_str == "Not Available":
+                        return None
+                    # Handle ISO format with Z timezone
+                    if isinstance(date_str, str) and "Z" in date_str:
+                        # Remove the Z and convert to UTC
+                        date_str = date_str.replace("Z", "+00:00")
+                    return pd.to_datetime(date_str, utc=True)
                 except Exception as e:
-                    print(f"\nError processing order {order_id}:")
-                    print(f"- Error type: {type(e).__name__}")
-                    print(f"- Error message: {str(e)}")
-                    print("- Order data:")
-                    for key, value in order_data.items():
-                        print(f"  {key}: '{value}' (type: {type(value)})")
-                    orders_failed += 1
+                    logging.warning(f"Could not parse date: {date_str}. Error: {e}")
+                    return None
+
+            def map_shipment_status(status):
+                """Map shipment status to valid enum values"""
+                if pd.isna(status) or status == "Not Available":
+                    return "Pending"
+                status_map = {
+                    "Shipped": "Shipped",
+                    "Delivered": "Delivered",
+                    "Pending": "Pending",
+                }
+                return status_map.get(status, "Pending")
+
+            def clean_quantity(qty):
+                """Ensure quantity is at least 1"""
+                try:
+                    qty = int(qty)
+                    return max(1, qty)
+                except (ValueError, TypeError):
+                    return 1
+
+            for _, row in items_data.iterrows():
+                try:
+                    self.db.cursor.execute(
+                        insert_query,
+                        (
+                            row["Order ID"],
+                            clean_quantity(row["Quantity"]),
+                            float(str(row["Unit Price"]).replace("$", "").replace(",", "")),
+                            float(str(row["Unit Price Tax"]).replace("$", "").replace(",", "")),
+                            map_shipment_status(row["Shipment Status"]),
+                            parse_date(row["Ship Date"]),
+                            row["ASIN"],
+                        ),
+                    )
+                except Exception as e:
+                    logging.error(f"Error processing row: {row}. Error: {e}")
                     continue
-        
-        print("\nOrder Storage Summary:")
-        print(f"- Orders processed successfully: {orders_processed}")
-        print(f"- Orders failed: {orders_failed}")
-        
-        return orders_processed, orders_failed
-        
-    except Exception as e:
-        print(f"Database error: {str(e)}")
-        raise e from None
+
+            self.db.conn.commit()
+            logging.info(f"Inserted {len(items_data)} order items")
+
+        except Exception as e:
+            logging.error(f"Error processing order items: {e}")
+            self.db.conn.rollback()
+            raise
+
+
+def main():
+    importer = OrdersImporter(db)
+    importer.import_orders_from_csv()
+
 
 if __name__ == "__main__":
-    # Read orders data
-    print(f"Reading orders data from {ORDERS_CSV_FILE_PATH}")
-    orders_df = read_orders_csv(ORDERS_CSV_FILE_PATH)
-    
-    # Store orders in database
-    processed, failed = store_orders(orders_df)
+    main()
