@@ -71,7 +71,6 @@ class OrdersImporter:
     def process_orders(self, df):
         """Process and insert orders data"""
         try:
-            # Process orders
             orders_data = df[
                 [
                     "Order ID", "Website", "Order Date", "Currency",
@@ -93,7 +92,11 @@ class OrdersImporter:
                     # Get address IDs
                     shipping_parsed = self.parse_address((row['Shipping Address'], 'shipping'))
                     billing_parsed = self.parse_address((row['Billing Address'], 'billing'))
-                    if shipping_parsed and billing_parsed:
+                    
+                    shipping_address_id = None
+                    billing_address_id = None
+
+                    if shipping_parsed:
                         # Get shipping address ID
                         self.db.cursor.execute("""
                             SELECT id FROM addresses
@@ -102,8 +105,10 @@ class OrdersImporter:
                             AND state = %s
                             AND postal_code = %s
                         """, (shipping_parsed[0], shipping_parsed[2], shipping_parsed[3], shipping_parsed[4]))
-                        shipping_address_id = self.db.cursor.fetchone()[0]
+                        result = self.db.cursor.fetchone()
+                        shipping_address_id = result[0] if result else None
 
+                    if billing_parsed:
                         # Get billing address ID
                         self.db.cursor.execute("""
                             SELECT id FROM addresses
@@ -112,35 +117,36 @@ class OrdersImporter:
                             AND state = %s
                             AND postal_code = %s
                         """, (billing_parsed[0], billing_parsed[2], billing_parsed[3], billing_parsed[4]))
-                        billing_address_id = self.db.cursor.fetchone()[0]
+                        result = self.db.cursor.fetchone()
+                        billing_address_id = result[0] if result else None
 
-                        # Insert order with address IDs
-                        self.db.cursor.execute("""
-                            INSERT INTO orders (
-                                order_id, website, order_date, currency,
-                                shipping_address_id, billing_address_id,
-                                total_owed, shipping_charge, total_discounts
-                            )
-                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-                            ON CONFLICT (order_id)
-                            DO UPDATE SET
-                                shipping_address_id = EXCLUDED.shipping_address_id,
-                                billing_address_id = EXCLUDED.billing_address_id,
-                                total_owed = EXCLUDED.total_owed,
-                                shipping_charge = EXCLUDED.shipping_charge,
-                                total_discounts = EXCLUDED.total_discounts,
-                                updated_at = CURRENT_TIMESTAMP
-                        """, (
-                            row["Order ID"],
-                            row["Website"],
-                            pd.to_datetime(row["Order Date"]),
-                            row["Currency"],
-                            shipping_address_id,
-                            billing_address_id,
-                            clean_monetary_value(row["Total Owed"]),
-                            clean_monetary_value(row["Shipping Charge"]),
-                            clean_monetary_value(row["Total Discounts"])
-                        ))
+                    # Insert order with address IDs
+                    self.db.cursor.execute("""
+                        INSERT INTO orders (
+                            order_id, website, order_date, currency,
+                            shipping_address_id, billing_address_id,
+                            total_owed, shipping_charge, total_discounts
+                        )
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        ON CONFLICT (order_id)
+                        DO UPDATE SET
+                            shipping_address_id = EXCLUDED.shipping_address_id,
+                            billing_address_id = EXCLUDED.billing_address_id,
+                            total_owed = EXCLUDED.total_owed,
+                            shipping_charge = EXCLUDED.shipping_charge,
+                            total_discounts = EXCLUDED.total_discounts,
+                            updated_at = CURRENT_TIMESTAMP
+                    """, (
+                        row["Order ID"],
+                        row["Website"],
+                        pd.to_datetime(row["Order Date"]),
+                        row["Currency"],
+                        shipping_address_id,
+                        billing_address_id,
+                        clean_monetary_value(row["Total Owed"]),
+                        clean_monetary_value(row["Shipping Charge"]),
+                        clean_monetary_value(row["Total Discounts"])
+                    ))
 
                 except Exception as e:
                     logging.error(f"Error processing order {row['Order ID']}: {e}")
