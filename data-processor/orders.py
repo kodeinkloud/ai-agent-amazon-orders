@@ -17,11 +17,11 @@ class OrdersImporter:
         self.db.connect_to_db()
 
     def import_orders_from_csv(self):
-        logging.info(ORDERS_CSV_FILE_PATH)
+        # logging.info(ORDERS_CSV_FILE_PATH)
         df = pd.read_csv(ORDERS_CSV_FILE_PATH)
-        # self.process_products(df)
-        # self.process_orders(df)
-        # self.process_order_items(df)
+        self.process_products(df)
+        self.process_orders(df)
+        self.process_order_items(df)
         self.process_addresses(df)
     def process_products(self, df):
         """Process and insert products data"""
@@ -39,7 +39,7 @@ class OrdersImporter:
                 subset=["ASIN"], keep="last"
             )
 
-            logging.info(f"Processing {len(products_data)} unique products")
+            # logging.info(f"Processing {len(products_data)} unique products")
 
             # Insert products
             insert_query = """
@@ -61,7 +61,7 @@ class OrdersImporter:
 
             execute_values(self.db.cursor, insert_query, products_tuples)
             self.db.conn.commit()
-            logging.info(f"Inserted/updated {len(products_data)} products")
+            # logging.info(f"Inserted/updated {len(products_data)} products")
 
         except Exception as e:
             logging.error(f"Error processing products: {e}")
@@ -74,57 +74,80 @@ class OrdersImporter:
             # Process orders
             orders_data = df[
                 [
-                    "Order ID",
-                    "Website",
-                    "Order Date",
-                    "Currency",
-                    "Total Owed",
-                    "Shipping Charge",
-                    "Total Discounts",
+                    "Order ID", "Website", "Order Date", "Currency",
+                    "Total Owed", "Shipping Charge", "Total Discounts",
+                    "Shipping Address", "Billing Address"
                 ]
             ].drop_duplicates()
 
-            # Insert orders
-            insert_query = """
-                INSERT INTO orders (
-                    order_id, website, order_date, currency,
-                    total_owed, shipping_charge, total_discounts
-                )
-                VALUES %s
-                ON CONFLICT (order_id) DO NOTHING
-                RETURNING id
-            """
-
             def clean_monetary_value(value):
-                """Clean monetary values by removing currency symbols and handling negative values"""
                 try:
-                    # Convert to string and remove currency symbols and commas
-                    cleaned = str(value).replace("$", "").replace(",", "")
-                    # Remove quotes if present
-                    cleaned = cleaned.replace('"', "").replace("'", "")
+                    cleaned = str(value).replace("$", "").replace(",", "").replace('"', "").replace("'", "")
                     return float(cleaned)
                 except (ValueError, AttributeError):
-                    logging.warning(
-                        f"Could not convert value: {value}, defaulting to 0.0"
-                    )
+                    logging.warning(f"Could not convert value: {value}, defaulting to 0.0")
                     return 0.0
 
-            orders_tuples = [
-                (
-                    row["Order ID"],
-                    row["Website"],
-                    pd.to_datetime(row["Order Date"]),
-                    row["Currency"],
-                    clean_monetary_value(row["Total Owed"]),
-                    clean_monetary_value(row["Shipping Charge"]),
-                    clean_monetary_value(row["Total Discounts"]),
-                )
-                for _, row in orders_data.iterrows()
-            ]
+            for _, row in orders_data.iterrows():
+                try:
+                    # Get address IDs
+                    shipping_parsed = self.parse_address((row['Shipping Address'], 'shipping'))
+                    billing_parsed = self.parse_address((row['Billing Address'], 'billing'))
+                    if shipping_parsed and billing_parsed:
+                        # Get shipping address ID
+                        self.db.cursor.execute("""
+                            SELECT id FROM addresses
+                            WHERE address_line1 = %s
+                            AND city = %s
+                            AND state = %s
+                            AND postal_code = %s
+                        """, (shipping_parsed[0], shipping_parsed[2], shipping_parsed[3], shipping_parsed[4]))
+                        shipping_address_id = self.db.cursor.fetchone()[0]
 
-            execute_values(self.db.cursor, insert_query, orders_tuples)
+                        # Get billing address ID
+                        self.db.cursor.execute("""
+                            SELECT id FROM addresses
+                            WHERE address_line1 = %s
+                            AND city = %s
+                            AND state = %s
+                            AND postal_code = %s
+                        """, (billing_parsed[0], billing_parsed[2], billing_parsed[3], billing_parsed[4]))
+                        billing_address_id = self.db.cursor.fetchone()[0]
+
+                        # Insert order with address IDs
+                        self.db.cursor.execute("""
+                            INSERT INTO orders (
+                                order_id, website, order_date, currency,
+                                shipping_address_id, billing_address_id,
+                                total_owed, shipping_charge, total_discounts
+                            )
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                            ON CONFLICT (order_id)
+                            DO UPDATE SET
+                                shipping_address_id = EXCLUDED.shipping_address_id,
+                                billing_address_id = EXCLUDED.billing_address_id,
+                                total_owed = EXCLUDED.total_owed,
+                                shipping_charge = EXCLUDED.shipping_charge,
+                                total_discounts = EXCLUDED.total_discounts,
+                                updated_at = CURRENT_TIMESTAMP
+                        """, (
+                            row["Order ID"],
+                            row["Website"],
+                            pd.to_datetime(row["Order Date"]),
+                            row["Currency"],
+                            shipping_address_id,
+                            billing_address_id,
+                            clean_monetary_value(row["Total Owed"]),
+                            clean_monetary_value(row["Shipping Charge"]),
+                            clean_monetary_value(row["Total Discounts"])
+                        ))
+
+                except Exception as e:
+                    logging.error(f"Error processing order {row['Order ID']}: {e}")
+                    continue
+
             self.db.conn.commit()
-            logging.info(f"Inserted {len(orders_data)} orders")
+            logging.info(f"Processed {len(orders_data)} orders")
 
         except Exception as e:
             logging.error(f"Error processing orders: {e}")
@@ -212,7 +235,7 @@ class OrdersImporter:
                     continue
 
             self.db.conn.commit()
-            logging.info(f"Inserted {len(items_data)} order items")
+            # logging.info(f"Inserted {len(items_data)} order items")
 
         except Exception as e:
             logging.error(f"Error processing order items: {e}")
@@ -237,7 +260,7 @@ class OrdersImporter:
                     all_addresses.add(('shipping', shipping_addr))
                 if pd.notna(billing_addr):
                     all_addresses.add(('billing', billing_addr))
-            logging.info(f"Processing {len(all_addresses)} unique addresses")
+            # logging.info(f"Processing {len(all_addresses)} unique addresses")
 
             # Insert addresses
             insert_query = """
@@ -247,23 +270,33 @@ class OrdersImporter:
                 VALUES %s
                 ON CONFLICT (address_line1, city, state, postal_code)
                 DO UPDATE SET
-                    updated_at = CURRENT_TIMESTAMP
+                    address_line2 = EXCLUDED.address_line2,
+                    country = EXCLUDED.country
                 RETURNING id, address_line1, city, state, postal_code
             """
             # Parse and prepare addresses for insertion
             address_tuples = []
+            seen_addresses = set()  # Track unique addresses
             for addr_type, addr in all_addresses:
-                logging.info(f"Address: {addr}")
                 parsed = self.parse_address((addr, addr_type))
-                logging.info(f"Parsed address: {parsed}")
                 if parsed:
-                    logging.info(f"Parsed address: {parsed}")
-                    address_tuples.append(parsed)
+                    # Create a key from the essential address components
+                    address_key = (
+                        parsed[0].upper(),  # address_line1
+                        # parsed[2],  # city
+                        # parsed[3],  # state
+                        # parsed[4]   # postal_code
+                    )
+                    # Only add if we haven't seen this address before
+                    if address_key not in seen_addresses:
+                        seen_addresses.add(address_key)
+                        address_tuples.append(parsed)
+                        logging.info(f"Added unique address: {parsed}")
 
             if not address_tuples:
                 logging.warning("No valid addresses to insert")
                 return
-
+            logging.info(f"Address tuples: {address_tuples}")
             # Insert addresses and get their IDs
             execute_values(self.db.cursor, insert_query, address_tuples, fetch=True)
             self.db.conn.commit()
@@ -303,7 +336,7 @@ class OrdersImporter:
             if order_address_data:
                 execute_values(self.db.cursor, order_address_insert, order_address_data)
                 self.db.conn.commit()
-                logging.info(f"Linked {len(order_address_data)} orders with addresses")
+                # logging.info(f"Linked {len(order_address_data)} orders with addresses")
 
         except Exception as e:
             logging.error(f"Error processing addresses: {e}")
@@ -313,7 +346,7 @@ class OrdersImporter:
     def parse_address(self, address_info):
         """Parse address string into components"""
         addr_str, addr_type = address_info
-        logging.info(f"Address info: {address_info}")
+        # logging.info(f"Address info: {address_info}")
         if pd.isna(addr_str) or addr_str == "Not Available":
             return None
 

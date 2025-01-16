@@ -58,6 +58,10 @@ CREATE TABLE addresses (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Add unique constraint to addresses table
+ALTER TABLE addresses ADD CONSTRAINT unique_address
+    UNIQUE (address_line1, city, state, postal_code);
+
 -- Payment methods table
 CREATE TABLE payment_methods (
     id SERIAL PRIMARY KEY,
