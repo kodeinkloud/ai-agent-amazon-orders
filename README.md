@@ -70,6 +70,10 @@ Here are some example questions you can ask the agent:
 - "What was the busiest month for orders?"
   - Response: November 2024 with 30 orders
 
+## Database Schema
+<img width="1054" alt="image" src="https://github.com/user-attachments/assets/f02e17c5-65d5-42c8-ae89-710c6c61bf9c" />
+
+
 ## License
 
 This project is open-sourced under the MIT License - see the LICENSE file for details.
