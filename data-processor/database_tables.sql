@@ -1,35 +1,35 @@
 -- Drop all tables (run this before creating new schema if needed)
 -- First drop all tables with dependencies
-DROP TABLE IF EXISTS 
-    cart_items,
-    digital_borrows,
-    digital_order_payments,
-    digital_order_items,
-    digital_orders,
-    refunds,
-    returns,
-    order_items,
-    orders,
-    payment_methods,
-    addresses,
-    products
-CASCADE;
+-- DROP TABLE IF EXISTS 
+--     cart_items,
+--     digital_borrows,
+--     digital_order_payments,
+--     digital_order_items,
+--     digital_orders,
+--     refunds,
+--     returns,
+--     order_items,
+--     orders,
+--     payment_methods,
+--     addresses,
+--     products
+-- CASCADE;
 
--- Drop triggers
-DROP TRIGGER IF EXISTS update_products_updated_at ON products;
-DROP TRIGGER IF EXISTS update_orders_updated_at ON orders;
-DROP TRIGGER IF EXISTS update_digital_orders_updated_at ON digital_orders;
+-- -- Drop triggers
+-- DROP TRIGGER IF EXISTS update_products_updated_at ON products;
+-- DROP TRIGGER IF EXISTS update_orders_updated_at ON orders;
+-- DROP TRIGGER IF EXISTS update_digital_orders_updated_at ON digital_orders;
 
--- Drop trigger function
-DROP FUNCTION IF EXISTS update_updated_at_column() CASCADE;
+-- -- Drop trigger function
+-- DROP FUNCTION IF EXISTS update_updated_at_column() CASCADE;
 
--- Drop custom ENUM types
-DROP TYPE IF EXISTS order_status_enum CASCADE;
-DROP TYPE IF EXISTS shipment_status_enum CASCADE;
-DROP TYPE IF EXISTS return_status_enum CASCADE;
+-- -- Drop custom ENUM types
+-- DROP TYPE IF EXISTS order_status_enum CASCADE;
+-- DROP TYPE IF EXISTS shipment_status_enum CASCADE;
+-- DROP TYPE IF EXISTS return_status_enum CASCADE;
 
--- Commit the transaction
-COMMIT;
+-- -- Commit the transaction
+-- COMMIT;
 
 -- Create custom types
 CREATE TYPE order_status_enum AS ENUM ('Open', 'Closed', 'Cancelled');
@@ -246,34 +246,34 @@ COMMENT ON TABLE cart_items IS 'Stores shopping cart items';
 
 
 
--- First, disable foreign key checks to avoid dependency issues
-SET session_replication_role = 'replica';
+-- -- First, disable foreign key checks to avoid dependency issues
+-- SET session_replication_role = 'replica';
 
--- Drop all tables with CASCADE to handle dependencies
-DROP TABLE IF EXISTS 
-    cart_items,
-    digital_borrows,
-    digital_order_payments,
-    digital_order_items,
-    digital_orders,
-    refunds,
-    returns,
-    order_items,
-    orders,
-    payment_methods,
-    addresses,
-    products
-CASCADE;
+-- -- Drop all tables with CASCADE to handle dependencies
+-- DROP TABLE IF EXISTS 
+--     cart_items,
+--     digital_borrows,
+--     digital_order_payments,
+--     digital_order_items,
+--     digital_orders,
+--     refunds,
+--     returns,
+--     order_items,
+--     orders,
+--     payment_methods,
+--     addresses,
+--     products
+-- CASCADE;
 
--- Drop all custom types
-DROP TYPE IF EXISTS 
-    order_status_enum,
-    shipment_status_enum,
-    return_status_enum
-CASCADE;
+-- -- Drop all custom types
+-- DROP TYPE IF EXISTS 
+--     order_status_enum,
+--     shipment_status_enum,
+--     return_status_enum
+-- CASCADE;
 
--- Drop all functions and triggers
-DROP FUNCTION IF EXISTS update_updated_at_column() CASCADE;
+-- -- Drop all functions and triggers
+-- DROP FUNCTION IF EXISTS update_updated_at_column() CASCADE;
 
--- Reset foreign key checks
-SET session_replication_role = 'origin';
+-- -- Reset foreign key checks
+-- SET session_replication_role = 'origin';
